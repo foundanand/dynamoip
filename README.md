@@ -215,26 +215,30 @@ See [docs/local-development.md](docs/local-development.md) for the full guide. T
 **1. Install as a dev dependency:**
 
 ```bash
-npm install --save-dev dynamoip
+npm install --save-dev dynamoip   # npm
+pnpm add -D dynamoip              # pnpm
+yarn add -D dynamoip              # yarn
 ```
 
 **2. Add `dynamoip.config.json`** to your project root (see [`dynamoip.config.example.json`](dynamoip.config.example.json) for the format).
 
-**3. Add scripts to `package.json`:**
+**3. Add a script to `package.json`:**
 
 ```json
 "scripts": {
-  "dev": "next dev",
-  "dev:proxy": "sudo dynamoip --config dynamoip.config.json",
-  "dev:full": "concurrently \"npm run dev\" \"sudo npm run dev:proxy\""
+  "dev:proxy": "dynamoip --config dynamoip.config.json"
 }
 ```
 
-**4. Run:**
+**4. Run alongside your dev server:**
 
 ```bash
-npm run dev:full
+sudo npm run dev:proxy    # npm
+sudo pnpm run dev:proxy   # pnpm
+sudo yarn dev:proxy       # yarn
 ```
+
+> Always run via your package manager — not bare `sudo dynamoip`. Package managers add `node_modules/.bin` to PATH so the binary is found; sudo's restricted PATH won't find it otherwise.
 
 ---
 
@@ -402,6 +406,9 @@ Delete `~/.localmap/certs/` and retry. Verify `CF_API_TOKEN` has the correct per
 
 **Domains not resolving on other devices**
 After a new A record, DNS can take up to 60 seconds to propagate. TTL is set to 60s so stale LAN IP records clear quickly.
+
+**`sudo: dynamoip: command not found`**
+Do not run `sudo dynamoip` directly — sudo uses a restricted PATH that doesn't include `node_modules/.bin`. Always run via your package manager: `sudo npm run dev:proxy`, `sudo pnpm run dev:proxy`, or `sudo yarn dev:proxy`.
 
 **`EACCES` on port 443 or 80**
 Run with `sudo`. This is required to bind to privileged ports (< 1024). Use `--port 8443` to avoid sudo — your URLs will include the port number.
