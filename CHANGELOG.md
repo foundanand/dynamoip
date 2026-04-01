@@ -7,6 +7,18 @@ dynamoip uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- Windows support for both Pro mode and Quick mode
+- Quick mode on Windows uses `multicast-dns` (pure Node.js) — no external tools required
+- Cross-platform `commandExists` helper in `src/utils.js` — uses `where` on Windows, `which` elsewhere
+- `registerCallback` in `src/cleanup.js` for non-process teardown (used by Windows mDNS)
+- Windows-aware EACCES error messages ("run as Administrator" instead of "run with sudo")
+- mkcert install instructions for Windows (Chocolatey and Scoop)
+
+---
+
 ## [1.0.0] — 2025-04-01
 
 ### Added

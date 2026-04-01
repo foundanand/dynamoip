@@ -12,6 +12,7 @@
   "dependencies": {
     "acme-client": "^5.4.0",
     "http-proxy": "^1.18.1",
+    "multicast-dns": "^7.2.5",
     "tldts": "^7.0.27"
   },
   "engines": {

@@ -1,12 +1,8 @@
 'use strict';
 
-const { spawn, spawnSync } = require('child_process');
-const { register } = require('./cleanup');
-
-function checkCommand(cmd) {
-  const r = spawnSync('which', [cmd], { stdio: 'ignore' });
-  return r.status === 0;
-}
+const { spawn } = require('child_process');
+const { register, registerCallback } = require('./cleanup');
+const { commandExists } = require('./utils');
 
 function spawnDnsSd(name, args) {
   const cp = spawn('dns-sd', args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -25,7 +21,7 @@ function spawnDnsSd(name, args) {
 }
 
 function registerMdnsMac(domains, proxyPort, lanIp, ssl) {
-  if (!checkCommand('dns-sd')) {
+  if (!commandExists('dns-sd')) {
     console.error('dns-sd not found. This tool requires macOS with dns-sd (built-in).');
     process.exit(1);
   }
@@ -43,7 +39,7 @@ function registerMdnsMac(domains, proxyPort, lanIp, ssl) {
 }
 
 function registerMdnsLinux(domains, proxyPort, lanIp, ssl) {
-  if (!checkCommand('avahi-publish')) {
+  if (!commandExists('avahi-publish')) {
     console.error('avahi-publish not found. Install with: sudo apt install avahi-utils');
     process.exit(1);
   }
@@ -72,13 +68,83 @@ function registerMdnsLinux(domains, proxyPort, lanIp, ssl) {
   }
 }
 
+function registerMdnsWindows(domains, proxyPort, lanIp, ssl) {
+  const multicastDns = require('multicast-dns');
+  const mdns = multicastDns();
+
+  const serviceType = ssl ? '_https._tcp.local' : '_http._tcp.local';
+
+  // Build lookup tables for fast query answering
+  const aRecords   = new Map();  // hostname.local -> lanIp
+  const srvRecords = new Map();  // name._type.local -> { port, target }
+
+  for (const { name, targetPort } of domains) {
+    const hostname = `${name}.local`;
+    aRecords.set(hostname, lanIp);
+    srvRecords.set(`${name}.${serviceType}`, { port: proxyPort, target: hostname });
+  }
+
+  mdns.on('query', (query) => {
+    const answers = [];
+
+    for (const question of query.questions) {
+      const qname = question.name.toLowerCase();
+
+      if (question.type === 'A' || question.type === 'ANY') {
+        if (aRecords.has(qname)) {
+          answers.push({ name: qname, type: 'A', ttl: 120, data: aRecords.get(qname) });
+        }
+      }
+
+      if (question.type === 'SRV' || question.type === 'ANY') {
+        const srvEntry = srvRecords.get(qname);
+        if (srvEntry) {
+          answers.push({
+            name: qname,
+            type: 'SRV',
+            ttl: 120,
+            data: { priority: 0, weight: 0, port: srvEntry.port, target: srvEntry.target },
+          });
+        }
+      }
+
+      if (question.type === 'PTR' || question.type === 'ANY') {
+        if (qname === serviceType) {
+          for (const [srvName] of srvRecords) {
+            answers.push({ name: serviceType, type: 'PTR', ttl: 120, data: srvName });
+          }
+        }
+      }
+    }
+
+    if (answers.length > 0) {
+      mdns.respond({ answers }, (err) => {
+        if (err) console.error(`[mdns:windows] respond error: ${err.message}`);
+      });
+    }
+  });
+
+  mdns.on('error', (err) => {
+    console.error(`[mdns:windows] ${err.message}`);
+  });
+
+  // Register teardown so Ctrl+C destroys the UDP socket cleanly
+  registerCallback(() => mdns.destroy());
+
+  for (const { name, targetPort } of domains) {
+    console.log(`  ${name}.local -> localhost:${targetPort}  [${lanIp}:${proxyPort}]`);
+  }
+}
+
 function registerAll(domains, proxyPort, lanIp, ssl) {
   if (process.platform === 'darwin') {
     registerMdnsMac(domains, proxyPort, lanIp, ssl);
   } else if (process.platform === 'linux') {
     registerMdnsLinux(domains, proxyPort, lanIp, ssl);
+  } else if (process.platform === 'win32') {
+    registerMdnsWindows(domains, proxyPort, lanIp, ssl);
   } else {
-    console.error(`Unsupported platform: ${process.platform}. Only macOS and Linux are supported.`);
+    console.error(`Unsupported platform: ${process.platform}. Only macOS, Linux, and Windows are supported.`);
     process.exit(1);
   }
 }

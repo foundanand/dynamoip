@@ -157,7 +157,8 @@ function startProxy(domains, proxyPort, sslOpts) {
     });
     redirectServer.on('error', (err) => {
       if (err.code === 'EACCES') {
-        console.warn(`  Note: could not bind HTTP redirect on port ${redirectPort} (run with sudo to enable)`);
+        const hint = process.platform === 'win32' ? 'run as Administrator to enable' : 'run with sudo to enable';
+        console.warn(`  Note: could not bind HTTP redirect on port ${redirectPort} (${hint})`);
       } else if (err.code !== 'EADDRINUSE') {
         console.warn(`  HTTP redirect error: ${err.message}`);
       }
@@ -179,7 +180,11 @@ function startProxy(domains, proxyPort, sslOpts) {
   server.on('error', (err) => {
     if (err.code === 'EACCES') {
       console.error(`\nPermission denied on port ${proxyPort}.`);
-      console.error(`Run with sudo, or set a higher port in your config.\n`);
+      if (process.platform === 'win32') {
+        console.error('Run this command from an Administrator terminal, or set a higher port in your config.\n');
+      } else {
+        console.error('Run with sudo, or set a higher port in your config.\n');
+      }
     } else if (err.code === 'EADDRINUSE') {
       console.error(`\nPort ${proxyPort} is already in use.\n`);
     } else {

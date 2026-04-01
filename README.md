@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/dynamoip)](https://www.npmjs.com/package/dynamoip)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D14-brightgreen)](https://nodejs.org)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](#requirements)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#requirements)
 
 **Give your local services real domain names and trusted HTTPS — reachable from any device on your network.**
 
@@ -79,15 +79,21 @@ No domain needed. Uses mDNS to broadcast `.local` hostnames on the LAN. Other de
 ## Requirements
 
 - **Node.js** >= 14
-- **macOS** or **Linux** — Windows is not currently supported ([upvote or track here](https://github.com/foundanand/dynamoip/issues))
-- **sudo** — required to bind to ports 80 and 443 (privileged ports). Use `--port 8443` to avoid this.
+- **macOS**, **Linux**, or **Windows**
+- **Elevated permissions** — required to bind to ports 80 and 443:
+  - macOS / Linux: run with `sudo`
+  - Windows: run from an Administrator terminal
+  - Use `--port 8443` on any platform to avoid this requirement
 
 **Pro mode additionally:**
 - A domain managed by Cloudflare (free tier works)
 - Cloudflare API token with `Zone:DNS:Edit` permission
 
 **Quick mode additionally:**
-- mkcert — `brew install mkcert` (macOS) or [download a binary](https://github.com/FiloSottile/mkcert/releases) (Linux)
+- mkcert:
+  - macOS: `brew install mkcert`
+  - Linux: [download a binary](https://github.com/FiloSottile/mkcert/releases) or `apt install mkcert`
+  - Windows: `choco install mkcert` or `scoop install mkcert`
 
 ---
 
@@ -418,6 +424,9 @@ Both devices must be on the same Wi-Fi (not one on Ethernet). Check your firewal
 
 **Linux: mDNS registration fails**
 `sudo apt install avahi-daemon avahi-utils && sudo systemctl start avahi-daemon`
+
+**Windows: `.local` not resolving on another device**
+Make sure Windows Firewall allows UDP port 5353 (mDNS). This is permitted by default on Private networks but may be blocked on Public networks. dynamoip uses a pure Node.js mDNS responder on Windows — no additional tools required.
 
 ---
 

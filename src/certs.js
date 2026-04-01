@@ -3,6 +3,7 @@
 const { spawnSync } = require('child_process');
 const fs   = require('fs');
 const path = require('path');
+const { commandExists } = require('./utils');
 
 // When the process is running as root via sudo, mkcert must run as the original
 // user so the CA gets installed into *their* keychain (what browsers trust),
@@ -46,15 +47,16 @@ function checkMkcert() {
     return ['/opt/homebrew/bin/mkcert', '/usr/local/bin/mkcert'].some(p => fs.existsSync(p));
   }
 
-  const r = spawnSync('which', ['mkcert'], { stdio: 'ignore' });
-  return r.status === 0;
+  return commandExists('mkcert');
 }
 
 function generateCerts(domains, certsDir) {
   if (!checkMkcert()) {
     console.error('\nmkcert not found. Install it to enable HTTPS:');
-    console.error('  brew install mkcert   (macOS)');
-    console.error('  apt install mkcert    (Linux)');
+    console.error('  brew install mkcert          (macOS)');
+    console.error('  apt install mkcert           (Linux)');
+    console.error('  choco install mkcert         (Windows, Chocolatey)');
+    console.error('  scoop install mkcert         (Windows, Scoop)');
     console.error('\nOr run with --no-ssl to use HTTP instead.\n');
     process.exit(1);
   }
@@ -95,9 +97,9 @@ function generateCerts(domains, certsDir) {
     process.exit(1);
   }
 
-  // Make cert files readable by the original user (not just root)
+  // Make cert files readable by the original user (not just root) — Unix only
   const sudoUser = process.env.SUDO_USER;
-  if (sudoUser) {
+  if (sudoUser && process.platform !== 'win32') {
     try {
       spawnSync('chown', [sudoUser, certFile, keyFile, certsDir], { stdio: 'ignore' });
     } catch (_) {}
