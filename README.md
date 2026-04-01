@@ -93,17 +93,18 @@ No domain needed. Uses mDNS to broadcast `.local` hostnames on the LAN. Other de
 
 ## Installation
 
+Install as a dev dependency in your project (recommended):
+
 ```bash
-npm install -g dynamoip
+npm install --save-dev dynamoip   # npm
+pnpm add -D dynamoip              # pnpm
+yarn add -D dynamoip              # yarn
 ```
 
-Or run without installing globally:
+Or install globally:
 
 ```bash
-git clone https://github.com/foundanand/dynamoip.git
-cd dynamoip
-npm install
-node bin/dynamoip.js
+npm install -g dynamoip
 ```
 
 ---
@@ -133,11 +134,23 @@ CF_EMAIL=you@example.com
 
 Get a token at **Cloudflare Dashboard → My Profile → API Tokens → Create Token**, using the **Edit zone DNS** template scoped to your domain.
 
-**3. Run:**
+**3. Add a script to `package.json`:**
+
+```json
+"scripts": {
+  "dev:proxy": "dynamoip --config dynamoip.config.json"
+}
+```
+
+**4. Run:**
 
 ```bash
-sudo dynamoip
+sudo npm run dev:proxy    # npm
+sudo pnpm run dev:proxy   # pnpm
+sudo yarn dev:proxy       # yarn
 ```
+
+> Always run via your package manager — not bare `sudo dynamoip`. Package managers add `node_modules/.bin` to PATH when running scripts; sudo's restricted PATH won't find the binary otherwise.
 
 **What happens on first run** (~1 minute):
 1. DNS A records are set in Cloudflare pointing to your LAN IP
@@ -172,7 +185,7 @@ Ready:
 
 After the first run, the certificate is cached in `~/.localmap/certs/` and startup is instant.
 
-**4. Open on any device on the same Wi-Fi** — no prompts, no setup required.
+**5. Open on any device on the same Wi-Fi** — no prompts, no setup required.
 
 ---
 
@@ -189,10 +202,18 @@ After the first run, the certificate is cached in `~/.localmap/certs/` and start
 }
 ```
 
-**2. Run:**
+**2. Add a script to `package.json`** and run:
+
+```json
+"scripts": {
+  "dev:proxy": "dynamoip --config dynamoip.config.json"
+}
+```
 
 ```bash
-sudo dynamoip
+sudo npm run dev:proxy    # npm
+sudo pnpm run dev:proxy   # pnpm
+sudo yarn dev:proxy       # yarn
 ```
 
 mkcert installs a local CA on first run (may prompt for your password), then generates a certificate covering all configured `.local` domains.
@@ -208,11 +229,11 @@ https://api.local
 
 ---
 
-## Using dynamoip in a Node.js project
+## Adding dynamoip to a project
 
-See [docs/local-development.md](docs/local-development.md) for the full guide. The short version:
+See [docs/local-development.md](docs/local-development.md) for the full guide.
 
-**1. Install as a dev dependency:**
+**1. Install:**
 
 ```bash
 npm install --save-dev dynamoip   # npm
@@ -222,23 +243,32 @@ yarn add -D dynamoip              # yarn
 
 **2. Add `dynamoip.config.json`** to your project root (see [`dynamoip.config.example.json`](dynamoip.config.example.json) for the format).
 
-**3. Add a script to `package.json`:**
+**3. Add scripts to `package.json`:**
 
 ```json
 "scripts": {
-  "dev:proxy": "dynamoip --config dynamoip.config.json"
+  "dev:proxy": "dynamoip --config dynamoip.config.json", // Dev enviroment
+  "proxy": "dynamoip --config dynamoip.config.json"  // Prod environment (Local networks)
 }
 ```
 
-**4. Run alongside your dev server:**
+Use `dev:proxy` when running alongside your dev server. Use `proxy` as a standalone command for production-like or home server setups.
+
+**4. Run:**
 
 ```bash
+# Development — run alongside your app
 sudo npm run dev:proxy    # npm
 sudo pnpm run dev:proxy   # pnpm
 sudo yarn dev:proxy       # yarn
+
+# Standalone / production
+sudo npm run proxy
+sudo pnpm run proxy
+sudo yarn proxy
 ```
 
-> Always run via your package manager — not bare `sudo dynamoip`. Package managers add `node_modules/.bin` to PATH so the binary is found; sudo's restricted PATH won't find it otherwise.
+> Always run via your package manager — not bare `sudo dynamoip`. Package managers add `node_modules/.bin` to PATH when running scripts; sudo's restricted PATH won't find the binary otherwise.
 
 ---
 
@@ -358,8 +388,8 @@ node examples/inventory/server.js    # port 3000
 # Terminal 2
 node examples/dashboard/server.js    # port 6000
 
-# Terminal 3
-sudo dynamoip
+# Terminal 3 — from the dynamoip repo root
+sudo npm run start
 ```
 
 ---
