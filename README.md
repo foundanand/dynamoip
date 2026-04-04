@@ -4,6 +4,7 @@
 [![npm](https://img.shields.io/npm/v/dynamoip)](https://www.npmjs.com/package/dynamoip)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D14-brightgreen)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20(Docker)-lightgrey)](#requirements)
+[![Visitors](https://visitor-badge.laobi.icu/badge?page_id=foundanand.dynamoip)](https://visitor-badge.laobi.icu)
 
 **Give your local services real domain names and trusted HTTPS — reachable from your network or the entire internet.**
 
