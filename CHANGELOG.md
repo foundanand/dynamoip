@@ -7,6 +7,20 @@ dynamoip uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [1.0.6] — 2026-04-04
+
+### Fixed
+- **Proxy crash on WebSocket errors**: `http-proxy` passes a raw `net.Socket` (not `http.ServerResponse`) as the third argument when a WebSocket proxy error occurs. The error handler was calling `res.writeHead()` on the socket, which crashed the entire process. The handler now detects this case and calls `socket.destroy()` instead.
+- **WebSocket HMR not working through proxy**: `http-proxy` 1.18.1 has a race condition with fast upstream servers (e.g. Next.js Turbopack) that send WebSocket frames in the same TCP packet as the 101 response — the HTTP parser sees binary frame bytes before the `upgrade` event fires. Replaced `proxy.ws()` with raw TCP piping via `net.connect()`, bypassing the HTTP parser entirely.
+- **Next.js HMR unauthorized rejection**: Next.js 15+ validates the `Origin` header on HMR WebSocket connections as a CSRF guard. The proxy was forwarding the browser's `Origin: https://your-domain.com` to the upstream, which Next.js rejected. Both `Host` and `Origin` are now rewritten to the upstream address (`http://localhost:<port>`) before forwarding.
+- **Repeated WebSocket error spam**: The same proxy error from the same host was logged on every retry. Rate-limited to once per 5 seconds per host+message combination.
+- **Cloudflare DNS error when switching from Max to Pro mode**: `upsertARecords` only queried for existing `A` records (`?type=A`). If a `CNAME` record was left over from a previous Max mode run, Cloudflare rejected the new `A` record creation. Now queries all record types for the hostname and deletes any existing record before creating the `A` record.
+
+### Added
+- **Graceful restart**: Unhandled exceptions and rejected promises no longer kill the process permanently. dynamoip closes open servers and restarts `main()` with exponential backoff (2s → 4s → 8s → 16s → 30s, capped at 5 consecutive restarts). The counter resets after 5 minutes of stable operation. Startup errors (EACCES, EADDRINUSE, bad config) still exit immediately since they require user action.
+
+---
+
 ## [1.0.5] — 2026-04-03
 
 ### Added

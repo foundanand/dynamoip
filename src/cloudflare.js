@@ -69,31 +69,28 @@ async function upsertARecords(apiToken, zoneId, baseDomain, domainNames, lanIp) 
   for (const name of domainNames) {
     const fqdn = `${name}.${baseDomain}`;
 
-    // Check if record already exists
-    const existing = await cfFetch(apiToken, 'GET', `/zones/${zoneId}/dns_records?type=A&name=${fqdn}`);
+    // Query without type filter — a CNAME left over from Max mode would be
+    // missed by ?type=A and then Cloudflare would reject the new A record
+    const existing = await cfFetch(apiToken, 'GET', `/zones/${zoneId}/dns_records?name=${fqdn}`);
     const record = existing.result?.[0];
 
     if (record) {
-      if (record.content === lanIp) {
+      if (record.type === 'A' && record.content === lanIp) {
         console.log(`  ${fqdn} -> ${lanIp}  (unchanged)`);
-      } else {
-        await cfFetch(apiToken, 'PATCH', `/zones/${zoneId}/dns_records/${record.id}`, {
-          content: lanIp,
-          ttl: 60,
-          proxied: false,
-        });
-        console.log(`  ${fqdn} -> ${lanIp}  (updated from ${record.content})`);
+        continue;
       }
-    } else {
-      await cfFetch(apiToken, 'POST', `/zones/${zoneId}/dns_records`, {
-        type: 'A',
-        name: fqdn,
-        content: lanIp,
-        ttl: 60,
-        proxied: false,
-      });
-      console.log(`  ${fqdn} -> ${lanIp}  (created)`);
+      // Wrong type (e.g. stale CNAME from Max mode) or wrong IP — delete and recreate
+      await cfFetch(apiToken, 'DELETE', `/zones/${zoneId}/dns_records/${record.id}`);
     }
+
+    await cfFetch(apiToken, 'POST', `/zones/${zoneId}/dns_records`, {
+      type: 'A',
+      name: fqdn,
+      content: lanIp,
+      ttl: 60,
+      proxied: false,
+    });
+    console.log(`  ${fqdn} -> ${lanIp}  (${record ? 'replaced' : 'created'})`);
   }
 }
 

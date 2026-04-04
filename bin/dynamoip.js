@@ -73,6 +73,49 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 
+// --- Graceful restart ---
+const MAX_RESTARTS = 5;
+const BASE_DELAY_MS = 2000;
+let restartCount = 0;
+let lastRestartTime = 0;
+let activeServers = [];
+
+function closeActiveServers() {
+  const toClose = activeServers.splice(0);
+  return Promise.all(
+    toClose.map(s => new Promise(resolve => s.close(resolve)))
+  );
+}
+
+async function restartAfterError(err) {
+  const now = Date.now();
+  if (now - lastRestartTime > 5 * 60 * 1000) restartCount = 0;
+  lastRestartTime = now;
+  restartCount++;
+
+  if (restartCount > MAX_RESTARTS) {
+    console.error(`\n[dynamoip] Too many restarts (${MAX_RESTARTS}). Exiting.\n`);
+    process.exit(1);
+  }
+
+  const delay = Math.min(BASE_DELAY_MS * (2 ** (restartCount - 1)), 30_000);
+  console.error(`\n[dynamoip] Unexpected error: ${err.message}`);
+  console.error(`[dynamoip] Restarting in ${delay / 1000}s (attempt ${restartCount}/${MAX_RESTARTS})...\n`);
+
+  await closeActiveServers();
+  await new Promise(r => setTimeout(r, delay));
+  run();
+}
+
+process.on('uncaughtException', (err) => {
+  restartAfterError(err).catch(() => process.exit(1));
+});
+
+process.on('unhandledRejection', (reason) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  restartAfterError(err).catch(() => process.exit(1));
+});
+
 // --- Main (async to support await) ---
 async function main() {
   const config  = loadConfig(configPath);
@@ -197,7 +240,8 @@ async function main() {
 
   // --- Proxy ---
   console.log('Starting proxy:');
-  const { server } = startProxy(config.domains, proxyPort, sslOpts, bindHost, config.baseDomain);
+  const { server, redirectServer } = startProxy(config.domains, proxyPort, sslOpts, bindHost, config.baseDomain);
+  activeServers = [server, redirectServer].filter(Boolean);
 
   // Background cert renewal for Pro mode
   if (effectiveAcme) {
@@ -230,4 +274,12 @@ async function main() {
   console.log('\nPress Ctrl+C to stop.\n');
 }
 
-main().catch(e => { console.error(e.message); process.exit(1); });
+async function run() {
+  try {
+    await main();
+  } catch (e) {
+    await restartAfterError(e);
+  }
+}
+
+run();

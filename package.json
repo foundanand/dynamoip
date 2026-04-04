@@ -1,6 +1,6 @@
 {
   "name": "dynamoip",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Give your local services real domain names and trusted HTTPS — reachable from any device on your network or the internet",
   "main": "bin/dynamoip.js",
   "bin": {

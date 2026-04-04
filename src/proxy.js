@@ -2,6 +2,7 @@
 
 const http  = require('http');
 const https = require('https');
+const net   = require('net');
 const fs    = require('fs');
 const httpProxy = require('http-proxy');
 
@@ -124,9 +125,22 @@ function startProxy(domains, proxyPort, sslOpts, bindHost = '0.0.0.0', baseDomai
   const routeMap = buildRouteMap(domains, (sslOpts && sslOpts.baseDomain) || baseDomain);
   const proxy = httpProxy.createProxyServer({ xfwd: true });
 
+  // Rate-limit identical proxy error messages (same host + message) to once per 5s
+  const errorLoggedAt = new Map();
   proxy.on('error', (err, req, res) => {
     const host = req.headers.host || 'unknown';
-    console.error(`[proxy] Error forwarding ${host}: ${err.message}`);
+    const key  = `${host}:${err.message}`;
+    const now  = Date.now();
+    if (!errorLoggedAt.has(key) || now - errorLoggedAt.get(key) > 5000) {
+      console.error(`[proxy] Error forwarding ${host}: ${err.message}`);
+      errorLoggedAt.set(key, now);
+    }
+    // When the error comes from a WebSocket proxy, `res` is a net.Socket, not
+    // an http.ServerResponse — it has no writeHead(). Destroy it instead.
+    if (typeof res.writeHead !== 'function') {
+      res.destroy();
+      return;
+    }
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Bad Gateway', message: err.message }));
@@ -167,13 +181,39 @@ function startProxy(domains, proxyPort, sslOpts, bindHost = '0.0.0.0', baseDomai
   }
 
   // WebSocket support (Vite HMR, Next.js Fast Refresh, etc.)
+  // http-proxy's ws() has a race condition with fast upstream servers (e.g.
+  // Next.js Turbopack) that send WebSocket frames in the same TCP packet as
+  // the 101 response — the HTTP parser sees binary frame bytes before the
+  // 'upgrade' event fires and throws "Parse Error: Expected HTTP/".
+  // Raw TCP piping bypasses the parser entirely and works with any upstream.
   server.on('upgrade', (req, socket, head) => {
     const target = resolveTarget(routeMap, req.headers.host);
-    if (target) {
-      proxy.ws(req, socket, head, { target });
-    } else {
-      socket.destroy();
-    }
+    if (!target) { socket.destroy(); return; }
+
+    const targetUrl = new URL(target);
+    const port = parseInt(targetUrl.port) || 80;
+    const host = targetUrl.hostname;
+
+    // Rebuild the upgrade request, rewriting Host and Origin to the upstream
+    // address. Next.js 15+ rejects WS upgrades where Origin doesn't match the
+    // dev server host — the browser sends the proxy domain as Origin, which
+    // fails Next.js's CSRF check for HMR connections.
+    const headers = Object.assign({}, req.headers, {
+      host:   `${host}:${port}`,
+      origin: `http://${host}:${port}`,
+    });
+    const headerStr = Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\r\n');
+    const upgradeReq = `${req.method} ${req.url} HTTP/1.1\r\n${headerStr}\r\n\r\n`;
+
+    const upstream = net.connect(port, host, () => {
+      upstream.write(upgradeReq);
+      if (head && head.length) upstream.write(head);
+      upstream.pipe(socket);
+      socket.pipe(upstream);
+    });
+
+    upstream.on('error', () => socket.destroy());
+    socket.on('error', () => upstream.destroy());
   });
 
   server.on('error', (err) => {
