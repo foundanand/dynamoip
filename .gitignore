@@ -15,3 +15,6 @@ certs/
 node_modules/
 
 dynamoip.config.json
+
+# Build output
+dist/
