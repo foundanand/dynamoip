@@ -2,20 +2,31 @@
   "name": "dynamoip",
   "version": "1.0.6",
   "description": "Give your local services real domain names and trusted HTTPS — reachable from any device on your network or the internet",
-  "main": "bin/dynamoip.js",
+  "main": "dist/dynamoip.cjs",
   "bin": {
-    "dynamoip": "bin/dynamoip.js"
+    "dynamoip": "dist/dynamoip.cjs"
   },
   "scripts": {
-    "start": "node bin/dynamoip.js"
+    "build": "tsdown",
+    "start": "npm run build && node dist/dynamoip.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "acme-client": "^5.4.0",
     "http-proxy": "^1.18.1",
     "tldts": "^7.0.27"
   },
+  "devDependencies": {
+    "@types/http-proxy": "^1.17.17",
+    "@types/node": "^18.19.130",
+    "tsdown": "^0.21.10",
+    "typescript": "^6.0.3",
+    "vitest": "^2.1.9"
+  },
   "engines": {
-    "node": ">=14"
+    "node": ">=18"
   },
   "license": "MIT"
 }
