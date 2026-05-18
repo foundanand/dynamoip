@@ -7,9 +7,24 @@ dynamoip uses [semantic versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [1.0.7] — 2026-05-19
 
-- TypeScript migration + vitest test suite → [`changelog/001-typescript-migration.md`](changelog/001-typescript-migration.md)
+### Changed
+- **Full TypeScript migration**: all source files (`src/`, `bin/`) rewritten to TypeScript — no behavioural changes, pure type-safety upgrade for contributors
+- **Build toolchain**: direct Node.js execution replaced by [tsdown](https://tsdown.dev) (Rolldown-backed successor to tsup); published output is `dist/dynamoip.cjs` with a sourcemap
+- **Minimum Node.js version bumped to `>=18`**: Node 14 and 16 are EOL; required by `@types/node@^18` and `target: node18` in the build config
+- **Async DNS in ACME module**: `dns.Resolver` replaced with `dns.promises.Resolver` — async DNS polling is now explicitly Promise-based rather than callback-wrapped
+- **`getAccountId` moved to `cloudflare.ts`**: was previously in `tunnel.ts`; lives alongside the other Cloudflare API helpers
+
+### Added
+- **73-test vitest suite** covering all modules: config parsing, proxy routing, Cloudflare API helpers, ACME cert logic, tunnel config generation, mDNS cleanup, and LAN IP detection
+- **`npm run typecheck`**: runs `tsc --noEmit` for type-only validation without triggering a build
+- **`src/types.ts`**: shared interfaces (`DomainEntry`, `Config`, `CloudflareConfig`, `SslOptions`) used across all modules
+- **`fatal(): never` helper in `config.ts`**: TypeScript-aware validation helper that enables correct flow-narrowing after each config check without casts
+- **Smaller npm package**: `.npmignore` now excludes `src/`, `bin/`, `tests/`, and build config files — only `dist/` is shipped to npm
+
+### Fixed
+- **Start script used wrong file extension**: `package.json` `bin` entry pointed at `dynamoip.js`; corrected to `dist/dynamoip.cjs` after the tsdown build
 
 ---
 
