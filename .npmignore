@@ -19,6 +19,11 @@ tsconfig.json
 tsdown.config.ts
 vitest.config.mjs
 
+# CI and repo meta — not useful to npm consumers
+.github/
+CLAUDE.md
+changelog/
+
 # Dev/test artifacts
 node_modules/
 .git/
