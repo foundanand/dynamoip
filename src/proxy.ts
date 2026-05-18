@@ -1,16 +1,18 @@
-'use strict';
+import http from 'http';
+import https from 'https';
+import net from 'net';
+import fs from 'fs';
+// CJS-style import required for export=X modules to access the namespace (httpProxy.Server)
+import httpProxy = require('http-proxy');
+import type { DomainEntry, SslOptions } from './types';
 
-const http  = require('http');
-const https = require('https');
-const net   = require('net');
-const fs    = require('fs');
-const httpProxy = require('http-proxy');
+type RouteMap = Map<string, string>;
 
-function buildCertPage(certUrl, domains, proxyPort) {
+export function buildCertPage(certUrl: string, domains: DomainEntry[], proxyPort: number): string {
   const portSuffix = proxyPort === 443 ? '' : `:${proxyPort}`;
-  const links = domains.map(d =>
-    `<li><a href="https://${d.name}.local${portSuffix}">${d.name}.local</a></li>`
-  ).join('\n');
+  const links = domains
+    .map(d => `<li><a href="https://${d.name}.local${portSuffix}">${d.name}.local</a></li>`)
+    .join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -85,9 +87,9 @@ function buildCertPage(certUrl, domains, proxyPort) {
 </html>`;
 }
 
-function buildRouteMap(domains, baseDomain) {
-  const map = new Map();
-  const targetHost = process.env.TARGET_HOST || 'localhost';
+export function buildRouteMap(domains: DomainEntry[], baseDomain: string | null): RouteMap {
+  const map: RouteMap = new Map();
+  const targetHost = process.env.TARGET_HOST ?? 'localhost';
   for (const { name, targetPort } of domains) {
     const target = `http://${targetHost}:${targetPort}`;
     map.set(`${name}.local`, target);
@@ -97,59 +99,65 @@ function buildRouteMap(domains, baseDomain) {
   return map;
 }
 
-function resolveTarget(routeMap, host) {
+export function resolveTarget(routeMap: RouteMap, host: string | undefined | null): string | null {
   if (!host) return null;
   const bare = host.split(':')[0].toLowerCase();
-  return routeMap.get(bare) || null;
+  return routeMap.get(bare) ?? null;
 }
 
-function makeRequestHandler(routeMap, proxy, domains) {
+function makeRequestHandler(
+  routeMap: RouteMap,
+  proxy: InstanceType<typeof httpProxy>,
+  domains: DomainEntry[],
+): http.RequestListener {
   return (req, res) => {
     const target = resolveTarget(routeMap, req.headers.host);
     if (target) {
       proxy.web(req, res, { target });
     } else {
-      const host = req.headers.host || '';
+      const host = req.headers.host ?? '';
       const configured = [...new Set(domains.map(d => `${d.name}.local`))];
       res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        error: 'Not Found',
-        message: `No service configured for "${host}"`,
-        configured,
-      }));
+      res.end(JSON.stringify({ error: 'Not Found', message: `No service configured for "${host}"`, configured }));
     }
   };
 }
 
-function startProxy(domains, proxyPort, sslOpts, bindHost = '0.0.0.0', baseDomain = null) {
-  const routeMap = buildRouteMap(domains, (sslOpts && sslOpts.baseDomain) || baseDomain);
+export function startProxy(
+  domains: DomainEntry[],
+  proxyPort: number,
+  sslOpts: SslOptions | null,
+  bindHost = '0.0.0.0',
+  baseDomain: string | null = null,
+): { server: https.Server | http.Server; redirectServer: http.Server | null } {
+  const routeMap = buildRouteMap(domains, (sslOpts?.baseDomain) ?? baseDomain);
   const proxy = httpProxy.createProxyServer({ xfwd: true });
 
   // Rate-limit identical proxy error messages (same host + message) to once per 5s
-  const errorLoggedAt = new Map();
-  proxy.on('error', (err, req, res) => {
-    const host = req.headers.host || 'unknown';
+  const errorLoggedAt = new Map<string, number>();
+  proxy.on('error', (err: Error, req: http.IncomingMessage, res: http.ServerResponse | net.Socket) => {
+    const host = req.headers.host ?? 'unknown';
     const key  = `${host}:${err.message}`;
     const now  = Date.now();
-    if (!errorLoggedAt.has(key) || now - errorLoggedAt.get(key) > 5000) {
+    if (!errorLoggedAt.has(key) || now - errorLoggedAt.get(key)! > 5000) {
       console.error(`[proxy] Error forwarding ${host}: ${err.message}`);
       errorLoggedAt.set(key, now);
     }
-    // When the error comes from a WebSocket proxy, `res` is a net.Socket, not
-    // an http.ServerResponse — it has no writeHead(). Destroy it instead.
-    if (typeof res.writeHead !== 'function') {
-      res.destroy();
+    // http-proxy passes a net.Socket as `res` for WebSocket proxy errors.
+    // Detect it by checking for writeHead, which only ServerResponse has.
+    if (!('writeHead' in res)) {
+      (res as net.Socket).destroy();
       return;
     }
-    if (!res.headersSent) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Bad Gateway', message: err.message }));
+    if (!(res as http.ServerResponse).headersSent) {
+      (res as http.ServerResponse).writeHead(502, { 'Content-Type': 'application/json' });
+      (res as http.ServerResponse).end(JSON.stringify({ error: 'Bad Gateway', message: err.message }));
     }
   });
 
   const handler = makeRequestHandler(routeMap, proxy, domains);
-  let server;
-  let redirectServer = null;
+  let server: https.Server | http.Server;
+  let redirectServer: http.Server | null = null;
 
   if (sslOpts) {
     const credentials = {
@@ -159,9 +167,9 @@ function startProxy(domains, proxyPort, sslOpts, bindHost = '0.0.0.0', baseDomai
     server = https.createServer(credentials, handler);
 
     // HTTP server: landing page + CA cert download + HTTPS redirect
-    const redirectPort = sslOpts.redirectPort || 80;
+    const redirectPort = sslOpts.redirectPort ?? 80;
     redirectServer = http.createServer((req, res) => {
-      const host = (req.headers.host || '').split(':')[0];
+      const host = (req.headers.host ?? '').split(':')[0];
       const portSuffix = proxyPort === 443 ? '' : `:${proxyPort}`;
       res.writeHead(301, { Location: `https://${host}${portSuffix}${req.url}` });
       res.end();
@@ -169,7 +177,7 @@ function startProxy(domains, proxyPort, sslOpts, bindHost = '0.0.0.0', baseDomai
     redirectServer.listen(redirectPort, () => {
       console.log(`  HTTP  :${redirectPort}  -> redirects to HTTPS`);
     });
-    redirectServer.on('error', (err) => {
+    redirectServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EACCES') {
         console.warn(`  Note: could not bind HTTP redirect on port ${redirectPort} (run with sudo to enable)`);
       } else if (err.code !== 'EADDRINUSE') {
@@ -181,12 +189,10 @@ function startProxy(domains, proxyPort, sslOpts, bindHost = '0.0.0.0', baseDomai
   }
 
   // WebSocket support (Vite HMR, Next.js Fast Refresh, etc.)
-  // http-proxy's ws() has a race condition with fast upstream servers (e.g.
-  // Next.js Turbopack) that send WebSocket frames in the same TCP packet as
-  // the 101 response — the HTTP parser sees binary frame bytes before the
-  // 'upgrade' event fires and throws "Parse Error: Expected HTTP/".
-  // Raw TCP piping bypasses the parser entirely and works with any upstream.
-  server.on('upgrade', (req, socket, head) => {
+  // Raw TCP piping bypasses the HTTP parser — avoids a race condition with fast
+  // upstream servers (e.g. Next.js Turbopack) that send WebSocket frames in the
+  // same TCP packet as the 101 response.
+  server.on('upgrade', (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     const target = resolveTarget(routeMap, req.headers.host);
     if (!target) { socket.destroy(); return; }
 
@@ -194,10 +200,8 @@ function startProxy(domains, proxyPort, sslOpts, bindHost = '0.0.0.0', baseDomai
     const port = parseInt(targetUrl.port) || 80;
     const host = targetUrl.hostname;
 
-    // Rebuild the upgrade request, rewriting Host and Origin to the upstream
-    // address. Next.js 15+ rejects WS upgrades where Origin doesn't match the
-    // dev server host — the browser sends the proxy domain as Origin, which
-    // fails Next.js's CSRF check for HMR connections.
+    // Rewrite Host and Origin to the upstream address.
+    // Next.js 15+ rejects WS upgrades where Origin doesn't match the dev server host.
     const headers = Object.assign({}, req.headers, {
       host:   `${host}:${port}`,
       origin: `http://${host}:${port}`,
@@ -207,16 +211,16 @@ function startProxy(domains, proxyPort, sslOpts, bindHost = '0.0.0.0', baseDomai
 
     const upstream = net.connect(port, host, () => {
       upstream.write(upgradeReq);
-      if (head && head.length) upstream.write(head);
+      if (head?.length) upstream.write(head);
       upstream.pipe(socket);
       socket.pipe(upstream);
     });
 
     upstream.on('error', () => socket.destroy());
-    socket.on('error', () => upstream.destroy());
+    socket.on('error',   () => upstream.destroy());
   });
 
-  server.on('error', (err) => {
+  server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EACCES') {
       console.error(`\nPermission denied on port ${proxyPort}.`);
       console.error(`Run with sudo, or set a higher port in your config.\n`);
@@ -236,5 +240,3 @@ function startProxy(domains, proxyPort, sslOpts, bindHost = '0.0.0.0', baseDomai
 
   return { server, redirectServer };
 }
-
-module.exports = { startProxy };

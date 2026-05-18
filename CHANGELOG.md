@@ -1,9 +1,15 @@
 # Changelog
 
 All notable changes to dynamoip are documented here.
+Detailed per-feature changelogs live in [`changelog/`](changelog/).
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 dynamoip uses [semantic versioning](https://semver.org/).
+
+---
+
+## [Unreleased]
+
+- TypeScript migration + vitest test suite → [`changelog/001-typescript-migration.md`](changelog/001-typescript-migration.md)
 
 ---
 

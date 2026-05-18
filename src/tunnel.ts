@@ -1,18 +1,28 @@
-'use strict';
-
-const fs       = require('fs');
-const path     = require('path');
-const os       = require('os');
-const crypto   = require('crypto');
-const { spawn, spawnSync } = require('child_process');
-const { cfFetch }  = require('./cloudflare');
-const { register } = require('./cleanup');
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import crypto from 'crypto';
+import { spawn, spawnSync } from 'child_process';
+import { cfFetch } from './cloudflare';
+import { register } from './cleanup';
+import type { DomainEntry } from './types';
 
 const TUNNELS_DIR = path.join(os.homedir(), '.localmap', 'tunnels');
 
+interface TunnelCredentials {
+  AccountTag: string;
+  TunnelID: string;
+  TunnelName: string;
+  TunnelSecret: string;
+}
+
+interface CfTunnel {
+  id: string;
+  name: string;
+}
+
 // Returns 'cloudflared' once the binary is available, installing it if needed.
-async function ensureCloudflared() {
-  // Already in PATH?
+export async function ensureCloudflared(): Promise<string> {
   if (spawnSync('which', ['cloudflared'], { stdio: 'ignore' }).status === 0) return 'cloudflared';
 
   console.log('  cloudflared not found — installing automatically...');
@@ -45,21 +55,19 @@ async function ensureCloudflared() {
   process.exit(1);
 }
 
-// Get the Cloudflare account ID from the zone's metadata
-async function getAccountId(apiToken, zoneId) {
-  const res = await cfFetch(apiToken, 'GET', `/zones/${zoneId}`);
-  const accountId = res.result?.account?.id;
-  if (!accountId) throw new Error('Could not read account ID from zone details.');
-  return accountId;
-}
-
 // Create or reuse a named tunnel. Returns { id }.
 // Credentials file is written to TUNNELS_DIR/{id}.json on first creation.
-async function ensureTunnel(apiToken, accountId, tunnelName) {
+export async function ensureTunnel(
+  apiToken: string,
+  accountId: string,
+  tunnelName: string,
+): Promise<{ id: string }> {
   fs.mkdirSync(TUNNELS_DIR, { recursive: true });
 
-  // Check for existing (non-deleted) tunnel with this name
-  const list = await cfFetch(apiToken, 'GET', `/accounts/${accountId}/cfd_tunnel?name=${encodeURIComponent(tunnelName)}&is_deleted=false`);
+  const list = await cfFetch<CfTunnel[]>(
+    apiToken, 'GET',
+    `/accounts/${accountId}/cfd_tunnel?name=${encodeURIComponent(tunnelName)}&is_deleted=false`,
+  );
   const existing = list.result?.[0];
 
   if (existing) {
@@ -74,18 +82,16 @@ async function ensureTunnel(apiToken, accountId, tunnelName) {
     await cfFetch(apiToken, 'DELETE', `/accounts/${accountId}/cfd_tunnel/${existing.id}`);
   }
 
-  // Create new tunnel
   const secret = crypto.randomBytes(32).toString('hex');
-  const res = await cfFetch(apiToken, 'POST', `/accounts/${accountId}/cfd_tunnel`, {
+  const res = await cfFetch<CfTunnel>(apiToken, 'POST', `/accounts/${accountId}/cfd_tunnel`, {
     name: tunnelName,
     tunnel_secret: Buffer.from(secret).toString('base64'),
   });
 
-  const tunnel = res.result;
+  const tunnel = res.result!;
   const credPath = path.join(TUNNELS_DIR, `${tunnel.id}.json`);
 
-  // Write credentials file (0o600 — contains tunnel secret)
-  const credentials = {
+  const credentials: TunnelCredentials = {
     AccountTag:   accountId,
     TunnelID:     tunnel.id,
     TunnelName:   tunnelName,
@@ -98,12 +104,18 @@ async function ensureTunnel(apiToken, accountId, tunnelName) {
 }
 
 // Write cloudflared config.yml. Called every startup so ingress stays in sync with config.
-function writeTunnelConfig(tunnelId, credentialsPath, domains, proxyPort, baseDomain) {
+export function writeTunnelConfig(
+  tunnelId: string,
+  credentialsPath: string,
+  domains: DomainEntry[],
+  proxyPort: number,
+  baseDomain: string,
+): string {
   fs.mkdirSync(TUNNELS_DIR, { recursive: true });
 
-  const ingressLines = domains.map(({ name }) =>
-    `  - hostname: ${name}.${baseDomain}\n    service: http://localhost:${proxyPort}`
-  ).join('\n');
+  const ingressLines = domains
+    .map(({ name }) => `  - hostname: ${name}.${baseDomain}\n    service: http://localhost:${proxyPort}`)
+    .join('\n');
 
   const yaml = [
     `tunnel: ${tunnelId}`,
@@ -119,20 +131,17 @@ function writeTunnelConfig(tunnelId, credentialsPath, domains, proxyPort, baseDo
 }
 
 // Spawn cloudflared with auto-restart on unexpected exit.
-// cloudflaredBin is the path or command name returned by ensureCloudflared().
-function startTunnel(configPath, tunnelName, cloudflaredBin) {
-  function spawn_() {
-    const cp = spawn(
-      cloudflaredBin,
-      ['tunnel', '--config', configPath, 'run'],
-      { stdio: ['ignore', 'pipe', 'pipe'] }
-    );
+export function startTunnel(configPath: string, tunnelName: string, cloudflaredBin: string): void {
+  function spawn_(): void {
+    const cp = spawn(cloudflaredBin, ['tunnel', '--config', configPath, 'run'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
 
-    cp.stdout.on('data', (d) => {
+    cp.stdout!.on('data', (d: Buffer) => {
       const msg = d.toString().trim();
       if (msg) console.log(`[cloudflared] ${msg}`);
     });
-    cp.stderr.on('data', (d) => {
+    cp.stderr!.on('data', (d: Buffer) => {
       const msg = d.toString().trim();
       if (msg) console.error(`[cloudflared] ${msg}`);
     });
@@ -144,10 +153,7 @@ function startTunnel(configPath, tunnelName, cloudflaredBin) {
     });
 
     register(cp);
-    return cp;
   }
 
   spawn_();
 }
-
-module.exports = { ensureCloudflared, getAccountId, ensureTunnel, writeTunnelConfig, startTunnel };

@@ -8,6 +8,17 @@ dynamoip.config.json
 *.key
 certs/
 
+# Source — only dist/ is published
+src/
+bin/
+tests/
+notes/
+
+# Build config
+tsconfig.json
+tsdown.config.ts
+vitest.config.mjs
+
 # Dev/test artifacts
 node_modules/
 .git/
