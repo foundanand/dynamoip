@@ -136,14 +136,14 @@ export function scheduleRenewal(
   cloudflareToken: string,
   email: string | null,
   httpsServer: https.Server | null,
-): void {
+): NodeJS.Timeout {
   const CHECK_INTERVAL   = 24 * 60 * 60 * 1000;
   const MAX_BACKOFF_DAYS = 4;
 
   let failedAttempts = 0;
   let nextRetryAfter: number | null = null;
 
-  setInterval(async () => {
+  const timer = setInterval(async () => {
     const meta = loadMeta();
     if (isCertValid(meta, baseDomain)) {
       failedAttempts = 0;
@@ -177,5 +177,8 @@ export function scheduleRenewal(
       console.error(`[dynamoip] Certificate renewal failed (attempt ${failedAttempts}): ${(e as Error).message}`);
       console.error(`[dynamoip] Next retry after ${retryDate} UTC. Existing cert is still being served.`);
     }
-  }, CHECK_INTERVAL).unref();
+  }, CHECK_INTERVAL);
+
+  timer.unref();
+  return timer;
 }

@@ -9,7 +9,7 @@ export interface CloudflareConfig {
 }
 
 export interface Config {
-  port: number;
+  port: number | null;
   domains: DomainEntry[];
   baseDomain: string | null;
   cloudflare: CloudflareConfig | null;

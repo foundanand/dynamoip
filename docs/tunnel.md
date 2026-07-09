@@ -149,8 +149,8 @@ On first run, dynamoip saves tunnel credentials to:
 
 ```
 ~/.localmap/tunnels/
-├── {tunnel-id}.json    tunnel credentials  (mode 0600 — contains secret)
-└── config.yml          cloudflared ingress config  (rewritten each run)
+├── {tunnel-id}.json          tunnel credentials  (mode 0600 — contains secret)
+└── config-{tunnel-id}.yml    cloudflared ingress config  (rewritten each run)
 ```
 
 The credentials file contains the tunnel secret and is only created once. If you delete it, dynamoip will recreate the tunnel on the next run (and update DNS accordingly).
