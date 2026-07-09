@@ -12,6 +12,7 @@ import { obtainCert, scheduleRenewal } from '../src/acme';
 import { upsertARecords, upsertCnameRecords, getZoneId, getAccountId } from '../src/cloudflare';
 import { checkMkcert, generateCerts, getCaCertPath } from '../src/certs';
 import { ensureCloudflared, ensureTunnel, writeTunnelConfig, startTunnel } from '../src/tunnel';
+import { cleanup } from '../src/cleanup';
 import type { SslOptions } from '../src/types';
 
 // --- Argument parsing ---
@@ -81,10 +82,19 @@ const BASE_DELAY_MS  = 2000;
 let restartCount     = 0;
 let lastRestartTime  = 0;
 let activeServers: (http.Server | https.Server)[] = [];
+let renewalTimer: NodeJS.Timeout | null = null;
 
 function closeActiveServers(): Promise<void[]> {
   const toClose = activeServers.splice(0);
   return Promise.all(toClose.map(s => new Promise<void>(resolve => s.close(() => resolve()))));
+}
+
+// Tear down everything main() spawned so a restart doesn't stack duplicate
+// cloudflared/dns-sd children or leave orphaned renewal timers running.
+async function teardown(): Promise<void> {
+  cleanup(); // SIGTERM all registered child processes (cloudflared, dns-sd, avahi)
+  if (renewalTimer) { clearInterval(renewalTimer); renewalTimer = null; }
+  await closeActiveServers();
 }
 
 async function restartAfterError(err: Error): Promise<void> {
@@ -102,7 +112,7 @@ async function restartAfterError(err: Error): Promise<void> {
   console.error(`\n[dynamoip] Unexpected error: ${err.message}`);
   console.error(`[dynamoip] Restarting in ${delay / 1000}s (attempt ${restartCount}/${MAX_RESTARTS})...\n`);
 
-  await closeActiveServers();
+  await teardown();
   await new Promise(r => setTimeout(r, delay));
   run();
 }
@@ -124,8 +134,9 @@ async function main(): Promise<void> {
   let lanIp: string;
   try { lanIp = getLanIp(); } catch (e) { console.error((e as Error).message); process.exit(1); }
 
-  const defaultPort = useTunnel ? 8080 : (useAcme || useMkcert) ? 443 : (config.port || 80);
-  const proxyPort   = portOverride ?? defaultPort;
+  // --port flag wins, then an explicit config `port`, then the mode default.
+  const defaultPort = useTunnel ? 8080 : (useAcme || useMkcert) ? 443 : 80;
+  const proxyPort   = portOverride ?? config.port ?? defaultPort;
   const bindHost    = useTunnel ? '127.0.0.1' : '0.0.0.0';
 
   const proto = (!useTunnel && (useAcme || useMkcert)) ? 'https' : 'http';
@@ -220,6 +231,10 @@ async function main(): Promise<void> {
       const { certFile, keyFile } = generateCerts(config.domains, certsDir);
       const caCertPath = getCaCertPath();
       sslOpts = { certFile, keyFile, redirectPort: 80, ...(caCertPath ? { caCertPath } : {}) };
+      if (caCertPath) {
+        console.log(`  CA certificate: ${caCertPath}`);
+        console.log(`  Trust other devices: open http://${lanIp!}/ to download and install it.`);
+      }
     } catch (e) {
       console.error(`\nCert error: ${(e as Error).message}\n`);
       process.exit(1);
@@ -241,7 +256,7 @@ async function main(): Promise<void> {
 
   // Background cert renewal for Pro mode
   if (effectiveAcme) {
-    scheduleRenewal(
+    renewalTimer = scheduleRenewal(
       config.baseDomain!,
       config.cloudflare!.apiToken,
       config.cloudflare!.email,

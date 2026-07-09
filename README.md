@@ -322,7 +322,7 @@ https://app.local
 https://api.local
 ```
 
-**Trusting HTTPS on other devices** requires installing the CA certificate once per device. The startup output prints the CA cert path and per-platform instructions.
+**Trusting HTTPS on other devices** requires installing the CA certificate once per device. On startup dynamoip prints the CA cert path and a trust-setup URL (`http://<your-lan-ip>/`). Open that URL on the other device to download the CA cert and follow the per-platform install steps.
 
 ---
 

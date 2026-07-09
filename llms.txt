@@ -126,8 +126,8 @@ See [docs/docker.md](docs/docker.md) for full Docker guide with compose examples
 │   ├── wildcard-key.pem
 │   └── meta.json
 └── tunnels/                  Max mode — tunnel credentials
-    ├── {tunnel-id}.json      (mode 0600, created once)
-    └── config.yml            (rewritten each startup)
+    ├── {tunnel-id}.json         (mode 0600, created once)
+    └── config-{tunnel-id}.yml   (rewritten each startup)
 ```
 
 Pro mode certs auto-renew 30 days before expiry with hot-reload (no restart needed). Delete `~/.localmap/certs/` to force a fresh certificate.

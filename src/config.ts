@@ -46,9 +46,14 @@ export function loadConfig(configPath: string): Config {
     fatal(`Failed to parse config: ${(e as Error).message}`);
   }
 
-  const port = (raw.port ?? 80) as number;
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    fatal(`Invalid proxy port: ${port}`);
+  // null = not specified; bin picks a mode-appropriate default (8080/443/80).
+  // An explicit value here is honoured in every mode.
+  let port: number | null = null;
+  if (raw.port !== undefined) {
+    if (!Number.isInteger(raw.port) || (raw.port as number) < 1 || (raw.port as number) > 65535) {
+      fatal(`Invalid proxy port: ${raw.port}`);
+    }
+    port = raw.port as number;
   }
 
   if (!raw.domains || typeof raw.domains !== 'object' || Array.isArray(raw.domains)) {

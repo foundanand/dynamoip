@@ -125,7 +125,8 @@ export function writeTunnelConfig(
     `  - service: http_status:404`,
   ].join('\n') + '\n';
 
-  const configPath = path.join(TUNNELS_DIR, 'config.yml');
+  // Per-tunnel filename so two dynamoip instances (different baseDomains) don't clobber each other.
+  const configPath = path.join(TUNNELS_DIR, `config-${tunnelId}.yml`);
   fs.writeFileSync(configPath, yaml, { mode: 0o600 });
   return configPath;
 }

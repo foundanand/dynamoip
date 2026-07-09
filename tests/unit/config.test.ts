@@ -204,9 +204,9 @@ describe('loadConfig', () => {
     expect(config.domains[0].name).toBe('myapp');
   });
 
-  it('defaults proxy port to 80 when not specified', () => {
+  it('leaves proxy port null when not specified (bin picks the mode default)', () => {
     const config = loadConfig(writeConfig(tmpDir, { domains: { api: 3000 } }));
-    expect(config.port).toBe(80);
+    expect(config.port).toBeNull();
   });
 
   it('respects an explicit port value', () => {
