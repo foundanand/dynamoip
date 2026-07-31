@@ -149,19 +149,34 @@ On first run, dynamoip saves tunnel credentials to:
 
 ```
 ~/.localmap/tunnels/
-├── {tunnel-id}.json    tunnel credentials  (mode 0600 — contains secret)
-└── config.yml          cloudflared ingress config  (rewritten each run)
+├── {tunnel-id}.json          tunnel credentials  (mode 0600 — contains secret)
+└── config-{tunnel-id}.yml    cloudflared ingress config  (rewritten each run)
 ```
 
-The credentials file contains the tunnel secret and is only created once. If you delete it, dynamoip will recreate the tunnel on the next run (and update DNS accordingly).
+The credentials file contains the tunnel secret. If you delete it — or run dynamoip on a
+second machine — the next startup fetches the secret back from Cloudflare and rewrites the
+file. The tunnel itself is never deleted, so a tunnel that is still serving traffic is left
+alone.
+
+Tunnels are named `dynamoip-{baseDomain}-{hostname}`, so each machine gets its own. Two
+machines sharing a `baseDomain` must not share a tunnel: Cloudflare would treat them as
+replicas and load-balance one machine's hostnames onto the other, which has no ingress rule
+for them and answers with the catch-all 404.
 
 ---
 
 ## Stopping and restarting
 
-Press **Ctrl+C** — dynamoip stops the cloudflared daemon cleanly. Your DNS CNAME records remain in Cloudflare; the tunnel will be unreachable until you restart dynamoip.
+Press **Ctrl+C** — dynamoip stops accepting new requests, lets in-flight ones finish, waits
+for cloudflared to drain its connections at Cloudflare's edge, then exits. Press Ctrl+C a
+second time to skip the wait and kill everything immediately.
 
-The tunnel credentials and Cloudflare Tunnel object persist across restarts. Next startup reuses them.
+The same sequence runs on `SIGTERM` and `SIGHUP`, so `kill` and container stops shut down
+cleanly too. This matters: a cloudflared left running after dynamoip exits keeps the
+tunnel's connections open, and Cloudflare then refuses to delete that tunnel.
+
+Your DNS CNAME records remain in Cloudflare; the tunnel is unreachable until you restart
+dynamoip. The tunnel credentials and Cloudflare Tunnel object persist across restarts.
 
 ---
 
@@ -196,15 +211,24 @@ dig app.yourdomain.com
 ```
 
 **`[cloudflared] failed to connect`**
-Check your internet connection. cloudflared needs to reach Cloudflare's edge servers. Also verify the credentials file at `~/.localmap/tunnels/{tunnel-id}.json` exists and is not corrupted (delete it to force recreation).
+Check your internet connection. cloudflared needs to reach Cloudflare's edge servers. Also
+verify the credentials file at `~/.localmap/tunnels/{tunnel-id}.json` is readable — an old
+`sudo dynamoip` run can leave a root-owned copy that cloudflared cannot read.
 
 **Recreating a broken tunnel**
-Delete the credentials file and restart:
+Deleting the credentials file no longer forces recreation — dynamoip restores it from
+Cloudflare. To get a genuinely fresh tunnel, delete the tunnel itself:
 ```bash
-rm ~/.localmap/tunnels/*.json
+cloudflared tunnel delete dynamoip-{baseDomain}-{hostname}
 dynamoip --config dynamoip.config.json
 ```
 This creates a fresh tunnel and updates DNS.
+
+**`This tunnel has active connections`**
+Something is still serving the tunnel — usually a cloudflared left running by an earlier
+dynamoip that was killed abruptly, or dynamoip running on another machine. Find it with
+`pgrep -fl cloudflared`; if it is not on this machine, check the connection's `origin_ip`
+in the Cloudflare Zero Trust dashboard.
 
 ---
 

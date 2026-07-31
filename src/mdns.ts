@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'child_process';
-import { register } from './cleanup';
+import { register, isShuttingDown } from './cleanup';
 import type { DomainEntry } from './types';
 
 function checkCommand(cmd: string): boolean {
@@ -14,9 +14,9 @@ function spawnDnsSd(name: string, args: string[]): void {
     if (msg) console.error(`[dns-sd:${name}] ${msg}`);
   });
   cp.on('exit', (code, signal) => {
-    if (signal !== 'SIGTERM') {
+    if (signal !== 'SIGTERM' && !isShuttingDown()) {
       console.error(`[dns-sd:${name}] exited unexpectedly (code=${code}), retrying in 3s...`);
-      setTimeout(() => spawnDnsSd(name, args), 3000);
+      setTimeout(() => spawnDnsSd(name, args), 3000).unref();
     }
   });
   register(cp);

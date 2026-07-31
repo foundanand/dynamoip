@@ -95,6 +95,29 @@ export async function getZoneId(apiToken: string, baseDomain: string): Promise<s
   return res.result[0].id;
 }
 
+interface DesiredRecord {
+  type: 'A' | 'CNAME';
+  content: string;
+  proxied?: boolean; // when set, an existing record must also match this to count as "already correct"
+}
+
+// Decide what to do with the records Cloudflare returned for a hostname.
+// Returns the id of a record that already matches the desired state (or null),
+// plus the ids of every other record that should be deleted first — so stale
+// A/AAAA/CNAME entries and duplicates never survive to conflict with the new record.
+export function planDnsRecords(
+  records: CfDnsRecord[],
+  desired: DesiredRecord,
+): { keepId: string | null; deleteIds: string[] } {
+  const match = records.find(r =>
+    r.type === desired.type &&
+    r.content === desired.content &&
+    (desired.proxied === undefined || r.proxied === desired.proxied),
+  );
+  const deleteIds = records.filter(r => !match || r.id !== match.id).map(r => r.id);
+  return { keepId: match ? match.id : null, deleteIds };
+}
+
 // Upsert A records for all domain names pointing to lanIp
 export async function upsertARecords(
   apiToken: string,
@@ -108,20 +131,21 @@ export async function upsertARecords(
     // Query without type filter — a CNAME left over from Max mode would be
     // missed by ?type=A and then Cloudflare would reject the new A record
     const existing = await cfFetch<CfDnsRecord[]>(apiToken, 'GET', `/zones/${zoneId}/dns_records?name=${fqdn}`);
-    const record = existing.result?.[0];
+    const { keepId, deleteIds } = planDnsRecords(existing.result ?? [], { type: 'A', content: lanIp });
 
-    if (record) {
-      if (record.type === 'A' && record.content === lanIp) {
-        console.log(`  ${fqdn} -> ${lanIp}  (unchanged)`);
-        continue;
-      }
-      await cfFetch(apiToken, 'DELETE', `/zones/${zoneId}/dns_records/${record.id}`);
+    for (const id of deleteIds) {
+      await cfFetch(apiToken, 'DELETE', `/zones/${zoneId}/dns_records/${id}`);
+    }
+
+    if (keepId) {
+      console.log(`  ${fqdn} -> ${lanIp}  (${deleteIds.length ? 'unchanged, cleaned up stale records' : 'unchanged'})`);
+      continue;
     }
 
     await cfFetch(apiToken, 'POST', `/zones/${zoneId}/dns_records`, {
       type: 'A', name: fqdn, content: lanIp, ttl: 60, proxied: false,
     });
-    console.log(`  ${fqdn} -> ${lanIp}  (${record ? 'replaced' : 'created'})`);
+    console.log(`  ${fqdn} -> ${lanIp}  (${deleteIds.length ? 'replaced' : 'created'})`);
   }
 }
 
@@ -179,20 +203,21 @@ export async function upsertCnameRecords(
   for (const name of domainNames) {
     const fqdn = `${name}.${baseDomain}`;
     const existing = await cfFetch<CfDnsRecord[]>(apiToken, 'GET', `/zones/${zoneId}/dns_records?name=${fqdn}`);
-    const record = existing.result?.[0];
+    const { keepId, deleteIds } = planDnsRecords(existing.result ?? [], { type: 'CNAME', content: target, proxied: true });
 
-    if (record) {
-      if (record.type === 'CNAME' && record.content === target && record.proxied) {
-        console.log(`  ${fqdn} -> ${target}  (unchanged)`);
-        continue;
-      }
-      await cfFetch(apiToken, 'DELETE', `/zones/${zoneId}/dns_records/${record.id}`);
+    for (const id of deleteIds) {
+      await cfFetch(apiToken, 'DELETE', `/zones/${zoneId}/dns_records/${id}`);
+    }
+
+    if (keepId) {
+      console.log(`  ${fqdn} -> ${target}  (${deleteIds.length ? 'unchanged, cleaned up stale records' : 'unchanged'})`);
+      continue;
     }
 
     await cfFetch(apiToken, 'POST', `/zones/${zoneId}/dns_records`, {
       type: 'CNAME', name: fqdn, content: target, ttl: 1, proxied: true,
     });
-    console.log(`  ${fqdn} -> ${target}  (${record ? 'replaced' : 'created'})`);
+    console.log(`  ${fqdn} -> ${target}  (${deleteIds.length ? 'replaced' : 'created'})`);
   }
 }
 

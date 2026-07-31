@@ -8,7 +8,7 @@ import type { DomainEntry, SslOptions } from './types';
 
 type RouteMap = Map<string, string>;
 
-export function buildCertPage(certUrl: string, domains: DomainEntry[], proxyPort: number): string {
+export function buildCertPage(domains: DomainEntry[], proxyPort: number): string {
   const portSuffix = proxyPort === 443 ? '' : `:${proxyPort}`;
   const links = domains
     .map(d => `<li><a href="https://${d.name}.local${portSuffix}">${d.name}.local</a></li>`)
@@ -105,6 +105,57 @@ export function resolveTarget(routeMap: RouteMap, host: string | undefined | nul
   return routeMap.get(bare) ?? null;
 }
 
+// Handler for the plain-HTTP server that runs alongside HTTPS.
+// - Serves the CA cert download and trust-setup page (Quick mode only, when caCertPath is set)
+//   so other devices can install the local CA — reachable at http://<lanIp>/.
+// - Redirects known hosts to HTTPS.
+// - Rejects unknown hosts instead of reflecting an arbitrary Host header into the redirect.
+export function createRedirectHandler(
+  routeMap: RouteMap,
+  proxyPort: number,
+  domains: DomainEntry[],
+  caCertPath: string | null,
+): http.RequestListener {
+  return (req, res) => {
+    const path = (req.url ?? '/').split('?')[0];
+
+    if (caCertPath && path === '/dynamoip-ca.crt') {
+      try {
+        const buf = fs.readFileSync(caCertPath);
+        res.writeHead(200, {
+          'Content-Type': 'application/x-x509-ca-cert',
+          'Content-Disposition': 'attachment; filename="dynamoip-ca.crt"',
+        });
+        res.end(buf);
+      } catch {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('CA certificate not found');
+      }
+      return;
+    }
+
+    const host = (req.headers.host ?? '').split(':')[0].toLowerCase();
+
+    // Known host → send it to HTTPS.
+    if (routeMap.has(host)) {
+      const portSuffix = proxyPort === 443 ? '' : `:${proxyPort}`;
+      res.writeHead(301, { Location: `https://${host}${portSuffix}${req.url}` });
+      res.end();
+      return;
+    }
+
+    // Unknown host in Quick mode (e.g. opened via the raw LAN IP) → serve the trust page.
+    if (caCertPath) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(buildCertPage(domains, proxyPort));
+      return;
+    }
+
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('Unknown host');
+  };
+}
+
 function makeRequestHandler(
   routeMap: RouteMap,
   proxy: InstanceType<typeof httpProxy>,
@@ -166,14 +217,11 @@ export function startProxy(
     };
     server = https.createServer(credentials, handler);
 
-    // HTTP server: landing page + CA cert download + HTTPS redirect
+    // HTTP server: trust-setup page + CA cert download (Quick mode) + HTTPS redirect
     const redirectPort = sslOpts.redirectPort ?? 80;
-    redirectServer = http.createServer((req, res) => {
-      const host = (req.headers.host ?? '').split(':')[0];
-      const portSuffix = proxyPort === 443 ? '' : `:${proxyPort}`;
-      res.writeHead(301, { Location: `https://${host}${portSuffix}${req.url}` });
-      res.end();
-    });
+    redirectServer = http.createServer(
+      createRedirectHandler(routeMap, proxyPort, domains, sslOpts.caCertPath ?? null),
+    );
     redirectServer.listen(redirectPort, () => {
       console.log(`  HTTP  :${redirectPort}  -> redirects to HTTPS`);
     });

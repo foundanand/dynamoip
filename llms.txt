@@ -100,9 +100,12 @@ Any device (LAN or internet)
   → localhost:3000
 ```
 
+- Tunnels are named `dynamoip-{baseDomain}-{hostname}` — one per machine. Two machines sharing a `baseDomain` must not share a tunnel: Cloudflare would treat them as replicas and load-balance one machine's hostnames onto the other, which has no ingress rule for them and returns the catch-all 404.
 - Tunnel credentials stored in `~/.localmap/tunnels/{id}.json` (mode 0600)
 - Tunnel config rewritten each startup so ingress stays in sync with `domains`
 - On restart, existing tunnel is reused — DNS is unchanged
+- If the credentials file is missing or unreadable, it is restored from Cloudflare's tunnel token endpoint. The tunnel is never deleted, so one that is still serving traffic is left alone.
+- Shutdown (`SIGINT`/`SIGTERM`/`SIGHUP`) is graceful: listeners close and in-flight requests drain (3s cap), then child processes are awaited for up to 8s before `SIGKILL`. A second signal skips the wait. Leaving `cloudflared` running would otherwise hold the tunnel's connections open and block the next startup.
 - `cloudflared` auto-installed: Homebrew on macOS, `sudo curl` to `/usr/local/bin` on Linux
 
 ## Running in Docker
@@ -126,8 +129,8 @@ See [docs/docker.md](docs/docker.md) for full Docker guide with compose examples
 │   ├── wildcard-key.pem
 │   └── meta.json
 └── tunnels/                  Max mode — tunnel credentials
-    ├── {tunnel-id}.json      (mode 0600, created once)
-    └── config.yml            (rewritten each startup)
+    ├── {tunnel-id}.json         (mode 0600, created once)
+    └── config-{tunnel-id}.yml   (rewritten each startup)
 ```
 
 Pro mode certs auto-renew 30 days before expiry with hot-reload (no restart needed). Delete `~/.localmap/certs/` to force a fresh certificate.
