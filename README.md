@@ -163,7 +163,7 @@ yarn proxy:live
 ```
 
 **What happens on first run:**
-1. A named Cloudflare Tunnel is created and credentials are saved to `~/.localmap/tunnels/`
+1. A Cloudflare Tunnel named `dynamoip-{baseDomain}-{hostname}` is created and credentials are saved to `~/.localmap/tunnels/`
 2. DNS CNAME records are set pointing each subdomain to the tunnel
 3. The local proxy starts on `127.0.0.1:8080`
 4. `cloudflared` connects to Cloudflare's edge
@@ -432,7 +432,7 @@ dynamoip proxy (localhost only)
       └──  api.yourdomain.com  →  localhost:4000
 ```
 
-1. **Named Cloudflare Tunnel** — created via API on first run. Credentials stored in `~/.localmap/tunnels/`. Reused on every subsequent startup.
+1. **Named Cloudflare Tunnel** — created via API on first run, named `dynamoip-{baseDomain}-{hostname}` so each machine gets its own. Credentials stored in `~/.localmap/tunnels/` and reused on every subsequent startup; if they go missing they are restored from Cloudflare rather than the tunnel being recreated.
 2. **CNAME DNS records** — each subdomain points to `{tunnel-id}.cfargotunnel.com`. Cloudflare routes incoming requests to the tunnel.
 3. **cloudflared daemon** — makes an outbound connection to Cloudflare. No inbound ports needed. No firewall rules. No sudo.
 4. **Local proxy on 127.0.0.1** — the proxy is not LAN-exposed; all external and LAN traffic goes through Cloudflare's edge.
@@ -490,7 +490,7 @@ Your machine (192.168.x.x)
 - Reverse proxy routes by `Host` header to the correct local port
 - WebSocket upgrades forwarded transparently (Vite HMR, Next.js Fast Refresh, etc.)
 - HTTP on port 80 redirects to HTTPS on port 443
-- Ctrl+C cleans up all mDNS registrations before exiting
+- Ctrl+C (or `SIGTERM`/`SIGHUP`) shuts down gracefully: stops accepting new requests, lets in-flight ones finish, then waits for `cloudflared` and mDNS registrations to exit before quitting. Press Ctrl+C again to skip the wait.
 
 ---
 

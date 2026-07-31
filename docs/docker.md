@@ -145,12 +145,24 @@ RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/downloa
     -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
 ```
 
+- **Set a fixed `hostname` (bridge networking only)** — tunnels are named
+  `dynamoip-{baseDomain}-{hostname}`, and a container's default hostname is its ID, which changes on
+  every recreate. Without a fixed `hostname:`, each `docker compose up --force-recreate` creates a
+  brand-new tunnel and leaves the previous one orphaned. Pin it as in the macOS/Windows example below.
+  With `network_mode: host` you must **not** set `hostname:` — Docker rejects the combination, and
+  host networking already gives the container the host's own stable hostname.
+
+- **Persist `~/.localmap/tunnels`** — the named volume in the examples below keeps the credentials
+  file across recreates. Without it the credentials are re-fetched from Cloudflare on every start,
+  which works but makes an extra API call each time.
+
 ### docker-compose for Max mode (macOS/Windows)
 
 ```yaml
 services:
   dynamoip:
     build: .
+    hostname: dynamoip                    # fixed — tunnel name depends on it
     environment:
       CF_API_TOKEN: ${CF_API_TOKEN}
       TARGET_HOST: host.docker.internal   # forward to services on the host
@@ -171,8 +183,8 @@ services:
   dynamoip:
     build: .
     network_mode: host   # localhost inside container = host localhost
-    environment:
-      CF_API_TOKEN: ${CF_API_TOKEN}
+    environment:         # no `hostname:` — host networking already supplies the host's
+      CF_API_TOKEN: ${CF_API_TOKEN}   # stable hostname, and Docker rejects both together
     volumes:
       - ./dynamoip.config.json:/app/dynamoip.config.json:ro
       - dynamoip-tunnels:/root/.localmap/tunnels

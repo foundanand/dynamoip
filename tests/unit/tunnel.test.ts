@@ -11,12 +11,34 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { writeTunnelConfig } from '../../src/tunnel.js';
+import { writeTunnelConfig, machineTag } from '../../src/tunnel.js';
 
 // writeTunnelConfig writes to ~/.localmap/tunnels/config-<tunnelId>.yml
 // We call it and verify the YAML content, then clean up
 const TUNNELS_DIR = path.join(os.homedir(), '.localmap', 'tunnels');
 const ymlFor = (tunnelId) => path.join(TUNNELS_DIR, `config-${tunnelId}.yml`);
+
+describe('machineTag', () => {
+  it('strips the mDNS .local suffix', () => {
+    expect(machineTag('Anands-MacBook-Pro-2.local')).toBe('anands-macbook-pro-2');
+  });
+
+  it('keeps two machines distinct so they never share a tunnel', () => {
+    expect(machineTag('mac-one.local')).not.toBe(machineTag('mac-two.local'));
+  });
+
+  it('sanitises characters Cloudflare tunnel names reject', () => {
+    expect(machineTag('Anand’s Mac (work).local')).toMatch(/^[a-z0-9-]+$/);
+  });
+
+  it('collapses and trims separators', () => {
+    expect(machineTag('__weird---host__')).toBe('weird-host');
+  });
+
+  it('falls back when the hostname sanitises to nothing', () => {
+    expect(machineTag('...')).toBe('host');
+  });
+});
 
 describe('writeTunnelConfig', () => {
   const written = new Set();

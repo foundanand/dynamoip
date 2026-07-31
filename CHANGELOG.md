@@ -7,6 +7,28 @@ dynamoip uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [1.0.8] — 2026-07-31
+
+### Fixed
+- **`This tunnel has active connections` on startup (Max mode)**: tunnels were named `dynamoip-{baseDomain}`, so every machine sharing a `baseDomain` competed for one tunnel. A machine without the credentials file — which is every machine but the one that created it — treated the tunnel as unrecoverable and tried to `DELETE` it. Cloudflare refuses to delete a tunnel with live connections, so startup failed outright. Tunnels are now named `dynamoip-{baseDomain}-{hostname}`, one per machine.
+- **Lost tunnel credentials no longer destroy the tunnel**: a missing credentials file now triggers a fetch from Cloudflare's tunnel token endpoint, which returns the account tag, tunnel ID, and secret. The credentials file is rebuilt from that. The tunnel is never deleted, so one still serving traffic from another machine is left alone.
+- **Root-owned credentials files are detected**: an earlier `sudo dynamoip` run could leave a root-owned `0600` credentials file. `existsSync` accepted it, then `cloudflared` failed to read it with an unrelated-looking error. The check is now a readability test, and an unreadable file is restored like a missing one.
+- **Orphaned `cloudflared` after an abrupt exit**: shutdown sent `SIGTERM` to children and called `process.exit(0)` immediately, without waiting. A surviving `cloudflared` keeps the tunnel's connections open at Cloudflare's edge, which is what blocked the next startup. Children are now awaited before exit.
+- **Child-process respawn race during shutdown**: the `cloudflared` and `dns-sd` auto-restart handlers only skipped respawning when the exit signal was `SIGTERM`. On Ctrl+C the child receives `SIGINT`, so a restart was scheduled mid-shutdown and could resurrect a process that then outlived dynamoip. Both handlers now check a shutdown flag, and their retry timers are `unref`'d.
+- **HTTP servers were never closed on exit**: in-flight requests were cut off mid-response on Ctrl+C. Listeners now close and requests drain first.
+
+### Changed
+- **Graceful shutdown on `SIGINT`, `SIGTERM`, and `SIGHUP`**: stop accepting new connections, drain in-flight requests (3s cap, so a keep-alive or WebSocket connection cannot stall the exit), then wait up to 8s for child processes before `SIGKILL`. A second signal skips the wait and exits immediately.
+- **Docker: pin `hostname:` in bridge networking** — tunnel names now depend on the hostname, and a container's default hostname is its ID, so recreating a container without a fixed `hostname:` orphans the old tunnel. Not applicable under `network_mode: host`, which supplies the host's hostname. See [docs/docker.md](docs/docker.md).
+
+### Upgrade note
+On first run after upgrading, each machine creates its own tunnel and repoints its DNS CNAME records to it. The old shared `dynamoip-{baseDomain}` tunnel is left in place and can be deleted once every machine has been upgraded:
+```bash
+cloudflared tunnel delete dynamoip-{baseDomain}
+```
+
+---
+
 ## [1.0.7] — 2026-05-19
 
 ### Changed

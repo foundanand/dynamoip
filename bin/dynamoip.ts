@@ -11,8 +11,8 @@ import { startProxy }    from '../src/proxy';
 import { obtainCert, scheduleRenewal } from '../src/acme';
 import { upsertARecords, upsertCnameRecords, getZoneId, getAccountId } from '../src/cloudflare';
 import { checkMkcert, generateCerts, getCaCertPath } from '../src/certs';
-import { ensureCloudflared, ensureTunnel, writeTunnelConfig, startTunnel } from '../src/tunnel';
-import { cleanup } from '../src/cleanup';
+import { ensureCloudflared, ensureTunnel, writeTunnelConfig, startTunnel, machineTag } from '../src/tunnel';
+import { cleanup, onExit } from '../src/cleanup';
 import type { SslOptions } from '../src/types';
 
 // --- Argument parsing ---
@@ -84,9 +84,25 @@ let lastRestartTime  = 0;
 let activeServers: (http.Server | https.Server)[] = [];
 let renewalTimer: NodeJS.Timeout | null = null;
 
-function closeActiveServers(): Promise<void[]> {
+// Stop listening and let in-flight requests finish. Bounded, because a keep-alive or
+// WebSocket connection would otherwise hold server.close() open indefinitely.
+const SERVER_DRAIN_MS = 3000;
+
+function closeActiveServers(): Promise<void> {
   const toClose = activeServers.splice(0);
-  return Promise.all(toClose.map(s => new Promise<void>(resolve => s.close(() => resolve()))));
+  if (!toClose.length) return Promise.resolve();
+
+  const closed = Promise.all(toClose.map(s => new Promise<void>(resolve => {
+    s.close(() => resolve());
+    s.closeIdleConnections?.();
+  })));
+
+  return Promise.race([
+    closed.then(() => {}),
+    new Promise<void>(resolve => setTimeout(resolve, SERVER_DRAIN_MS).unref()),
+  ]).then(() => {
+    for (const s of toClose) s.closeAllConnections?.();
+  });
 }
 
 // Tear down everything main() spawned so a restart doesn't stack duplicate
@@ -116,6 +132,13 @@ async function restartAfterError(err: Error): Promise<void> {
   await new Promise(r => setTimeout(r, delay));
   run();
 }
+
+// Ctrl+C / SIGTERM: drain the proxy and stop the renewal timer before cleanup.ts
+// reaps cloudflared and exits.
+onExit(async () => {
+  if (renewalTimer) { clearInterval(renewalTimer); renewalTimer = null; }
+  await closeActiveServers();
+});
 
 process.on('uncaughtException',   (err)    => { restartAfterError(err).catch(() => process.exit(1)); });
 process.on('unhandledRejection',  (reason) => {
@@ -159,7 +182,7 @@ async function main(): Promise<void> {
   // --- Max mode: Cloudflare Tunnel ---
   if (useTunnel) {
     const { apiToken } = config.cloudflare!;
-    const tunnelName = `dynamoip-${config.baseDomain}`;
+    const tunnelName = `dynamoip-${config.baseDomain}-${machineTag()}`;
 
     console.log('Cloudflare Tunnel:');
     const cloudflaredBin = await ensureCloudflared();
